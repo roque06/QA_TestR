@@ -1,79 +1,84 @@
+# utils_testrail.py
 import requests
-import pandas as pd
 import streamlit as st
 
-# 🔐 Obtener credenciales desde .streamlit/secrets.toml
-TESTRAIL_DOMAIN = st.secrets["testrail_url"]
-TESTRAIL_USER = st.secrets["testrail_email"]
-TESTRAIL_API_KEY = st.secrets["testrail_api_key"]
+def _testrail_cfg():
+    """
+    Devuelve credenciales de TestRail desde st.secrets.
+    Se espera en .streamlit/secrets.toml:
+        testrail_url = "https://..."
+        testrail_email = "usuario@empresa.com"
+        testrail_api_key = "API_KEY"
+    """
+    url   = st.secrets.get("testrail_url")
+    email = st.secrets.get("testrail_email")
+    api_key = st.secrets.get("testrail_api_key")
 
-HEADERS = {
-    "Content-Type": "application/json"
-}
-AUTH = (TESTRAIL_USER, TESTRAIL_API_KEY)
+    missing = [k for k, v in {
+        "testrail_url": url, "testrail_email": email, "testrail_api_key": api_key
+    }.items() if not v]
+    if missing:
+        st.error(f"❌ Faltan claves en secrets.toml: {', '.join(missing)}")
+        st.stop()
 
-# 🧩 Obtener lista de proyectos
-def obtener_proyectos():
-    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/get_projects"
-    try:
-        response = requests.get(url, auth=AUTH)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"❌ Error al obtener proyectos: {e}")
-        return None
+    return {"url": url, "email": email, "api_key": api_key}
 
-# 📁 Obtener suites de un proyecto
-def obtener_suites(project_id):
-    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/get_suites/{project_id}"
-    try:
-        response = requests.get(url, auth=AUTH)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"❌ Error al obtener suites: {e}")
-        return None
 
-# 📂 Obtener secciones de una suite
-def obtener_secciones(project_id, suite_id):
-    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/get_sections/{project_id}&suite_id={suite_id}"
-    try:
-        response = requests.get(url, auth=AUTH)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"❌ Error al obtener secciones: {e}")
-        return None
-
-# 🚀 Subir casos de prueba a TestRail
-def enviar_a_testrail(section_id, dataframe: pd.DataFrame):
-    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/add_case/{section_id}"
-    exitosos = 0
-    errores = []
-
-    for i, fila in dataframe.iterrows():
-        datos = {
-            "title": fila.get("Title", "Caso sin título"),
-            "custom_preconds": fila.get("Preconditions", ""),
-            "custom_steps": fila.get("Steps", ""),
-            "custom_expected": fila.get("Expected Result", ""),
-            "custom_type": fila.get("Type", "Funcionalidad"),
-            "custom_priority": fila.get("Priority", "Alta")
-        }
-
-        try:
-            response = requests.post(url, headers=HEADERS, auth=AUTH, json=datos)
-            if response.status_code == 200:
-                exitosos += 1
-            else:
-                errores.append(f"Fila {i}: {response.status_code} - {response.text}")
-        except Exception as e:
-            errores.append(f"Fila {i}: {e}")
-
-    exito_total = exitosos == len(dataframe)
+def _auth_headers(cfg):
     return {
-        "exito": exito_total,
-        "subidos": exitosos,
-        "total": len(dataframe),
-        "detalle": errores if errores else None
-    }
+        "Content-Type": "application/json",
+    }, (cfg["email"], cfg["api_key"])
+
+
+# Ejemplos de funciones usando esa config
+def obtener_proyectos():
+    cfg = _testrail_cfg()
+    headers, auth = _auth_headers(cfg)
+    resp = requests.get(f"{cfg['url']}/index.php?/api/v2/get_projects", headers=headers, auth=auth)
+    if resp.status_code != 200:
+        st.error(f"Error obteniendo proyectos: {resp.status_code} - {resp.text}")
+        return []
+    return resp.json()
+
+
+def obtener_suites(project_id: int):
+    cfg = _testrail_cfg()
+    headers, auth = _auth_headers(cfg)
+    resp = requests.get(f"{cfg['url']}/index.php?/api/v2/get_suites/{project_id}", headers=headers, auth=auth)
+    return resp.json()
+
+
+def obtener_secciones(project_id: int, suite_id: int):
+    cfg = _testrail_cfg()
+    headers, auth = _auth_headers(cfg)
+    resp = requests.get(f"{cfg['url']}/index.php?/api/v2/get_sections/{project_id}&suite_id={suite_id}", headers=headers, auth=auth)
+    return resp.json()
+
+
+def enviar_a_testrail(suite_id: int, section_id: int, cases: list):
+    """
+    cases = [
+        {"title": "...", "custom_preconds": "...", "custom_steps": "..."}
+    ]
+    """
+    cfg = _testrail_cfg()
+    headers, auth = _auth_headers(cfg)
+
+    results = []
+    for case in cases:
+        payload = {
+            "title": case.get("title", ""),
+            "custom_preconds": case.get("custom_preconds", ""),
+            "custom_steps": case.get("custom_steps", "")
+        }
+        resp = requests.post(
+            f"{cfg['url']}/index.php?/api/v2/add_case/{section_id}",
+            headers=headers, auth=auth, json=payload
+        )
+        if resp.status_code == 200:
+            results.append(resp.json())
+        else:
+            st.error(f"Error creando caso: {resp.status_code} - {resp.text}")
+    return results
+
+
