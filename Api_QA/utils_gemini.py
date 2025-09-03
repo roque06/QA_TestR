@@ -12,8 +12,6 @@ import streamlit as st
 import pandas as pd
 import time
 
-from debug_fallback import modo_recuperacion_debug
-
 
 def prompt_generar_escenarios_profesionales(descripcion_refinada):
     return {
@@ -253,4 +251,5 @@ def obtener_descripcion_refinada(texto_funcional, max_intentos=3):
         time.sleep(1)  # pequeño retardo antes de reintentar
 
     # si llega aquí, todos los intentos fallaron
+
     raise ValueError("⚠️ Gemini no devolvió descripción válida tras varios intentos.")
