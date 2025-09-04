@@ -1,10 +1,13 @@
+# ============================ Cleantest.py (LIMPIO + PATCH + HEADER FIX) ============================
 import io
 import pandas as pd
 import streamlit as st
-from datetime import datetime  
+from datetime import datetime
 
+# 1) SIEMPRE la primera llamada Streamlit
 st.set_page_config(page_title="Generador QA", layout="wide", initial_sidebar_state="collapsed")
 
+# 2) Importar utilidades propias SOLO una vez
 from auth_ui import SecureShell
 from utils_ui import titulo_seccion, spinner_accion
 from utils_csv import (
@@ -19,18 +22,21 @@ from utils_gemini import (
     prompt_generar_escenarios_profesionales, obtener_descripcion_refinada
 )
 
+# 3) Login + tamaños independientes
 shell = SecureShell(
     auth_yaml=".streamlit/auth.yaml",
-    login_page_width=560,   
-    app_page_width=1600,   
+    login_page_width=560,   # <-- ancho SOLO del login
+    app_page_width=1600,    # <-- ancho SOLO del contenido de la app
     logout_top=12,
     logout_right=96,
 )
 if not shell.login():
     st.stop()
 
+# ============================ APP (UNA SOLA VEZ) ============================
 st.title("🧪 Generador de Escenarios QA para TestRail")
 
+# Estado global
 st.session_state.setdefault("historial_generaciones", [])
 st.session_state.setdefault("historial", [])
 st.session_state.setdefault("df_editable", None)
@@ -38,24 +44,27 @@ st.session_state.setdefault("generado", False)
 st.session_state.setdefault("texto_funcional", "")
 st.session_state.setdefault("descripcion_refinada", "")
 
+# Tabs principales
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "✏️ Generar", "🛠️ Editar", "🧪 Revisar", "📚 Historial", "🚀 Subir a TestRail"
 ])
 
 def limpiar_pestanas():
     """Limpia variables de estado menos el historial."""
-    keys_keep = {"historial_generaciones"}  # conserva historial
+    keys_keep = {"historial_generaciones"}
     for key in list(st.session_state.keys()):
         if key not in keys_keep:
-            # OJO: Si quieres conservar más variables, añádelas a keys_keep.
             pass
 
-st.markdown("""
+st.markdown(
+    """
 <style>
 .divider { border-top: 1px solid #CCC; margin: 20px 0 10px; }
 </style>
 <div class="divider"></div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Botón global de limpieza con key única
 if st.button("🧹 Limpiar todo", key="btn_limpiar_global"):
@@ -70,7 +79,7 @@ with tab1:
         "Texto funcional original",
         value=st.session_state.get("texto_funcional", ""),
         height=250,
-        key="texto_funcional"  # la misma clave para que la conserve
+        key="texto_funcional",
     )
 
     if st.button("Generar escenarios de prueba", key="btn_generar_tab1"):
@@ -79,7 +88,9 @@ with tab1:
         else:
             try:
                 with st.spinner("🧠 Reestructurando texto..."):
-                    descripcion_refinada = obtener_descripcion_refinada(st.session_state["texto_funcional"])
+                    descripcion_refinada = obtener_descripcion_refinada(
+                        st.session_state["texto_funcional"]
+                    )
 
                 st.session_state["descripcion_refinada"] = descripcion_refinada
 
@@ -94,33 +105,51 @@ with tab1:
                 csv_valido = limpiar_csv_con_formato(csv_limpio, columnas_esperadas=6)
                 csv_corregido = corregir_csv_con_comas(csv_valido, columnas_objetivo=6)
 
-                # Convertir en DataFrame
-                df = pd.read_csv(io.StringIO(csv_corregido))
+                # Convertir en DataFrame (detección de encabezados)
+                expected_cols = [
+                    "Title",
+                    "Preconditions",
+                    "Steps",
+                    "Expected Result",
+                    "Type",
+                    "Priority",
+                ]
+
+                df_try = pd.read_csv(io.StringIO(csv_corregido))
+                if [c.strip() for c in df_try.columns.tolist()] != expected_cols:
+                    df = pd.read_csv(
+                        io.StringIO(csv_corregido), header=None, names=expected_cols
+                    )
+                else:
+                    df = df_try.copy()
+
                 # Asegurar columnas clave y normalizar strings
-                columnas_clave = ["Title", "Preconditions", "Steps", "Expected Result", "Type", "Priority"]
-                for col in columnas_clave:
+                for col in expected_cols:
                     if col not in df.columns:
                         df[col] = ""
                 df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
-                # Normalizar Steps (evita KeyError si faltó en el CSV)
+                # Normalizar Steps
                 if "Steps" in df.columns:
-                    df["Steps"] = df["Steps"].apply(normalizar_steps).str.replace(r'\\n', '\n', regex=True)
+                    df["Steps"] = df["Steps"].apply(normalizar_steps).str.replace(
+                        r"\\n", "\n", regex=True
+                    )
 
-                # Estado inicial
                 if "Estado" not in df.columns:
                     df["Estado"] = "Pendiente"
 
                 st.session_state.df_editable = df
                 st.session_state.generado = True
 
-                st.session_state["historial_generaciones"].append({
-                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "fuente": "QA",
-                    "origen": "Generación inicial",
-                    "descripcion": descripcion_refinada,
-                    "escenarios": df.copy()
-                })
+                st.session_state["historial_generaciones"].append(
+                    {
+                        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "fuente": "QA",
+                        "origen": "Generación inicial",
+                        "descripcion": descripcion_refinada,
+                        "escenarios": df.copy(),
+                    }
+                )
 
             except Exception as e:
                 st.error(f"❌ Error durante el proceso: {e}")
@@ -128,10 +157,6 @@ with tab1:
                 st.session_state.df_editable = None
                 st.session_state.generado = False
 
-    # Mostrar DF si ya existía
-    if st.session_state.get("df_editable") is not None:
-        st.markdown("### ✅ Escenarios generados previamente:")
-        st.dataframe(st.session_state.df_editable, use_container_width=True)
 
 # --------------------------- TAB 2: EDITAR ---------------------------
 with tab2:
@@ -142,33 +167,50 @@ with tab2:
     else:
         df = st.session_state.df_editable.copy()
 
-        # Asegurar columnas clave
-        columnas_clave = ["Title", "Preconditions", "Steps", "Expected Result", "Type", "Priority", "Estado"]
+        columnas_clave = [
+            "Title",
+            "Preconditions",
+            "Steps",
+            "Expected Result",
+            "Type",
+            "Priority",
+            "Estado",
+        ]
         for col in columnas_clave:
             if col not in df.columns:
                 df[col] = ""
 
-        # Normalizar texto en Steps / Expected
         if "Steps" in df.columns:
             df["Steps"] = df["Steps"].apply(normalizar_steps)
         if "Expected Result" in df.columns:
             df["Expected Result"] = df["Expected Result"].apply(normalizar_steps)
 
-        # Editor
         edited_df = st.data_editor(
             df,
             num_rows="dynamic",
             use_container_width=True,
             column_config={
-                "Priority": st.column_config.SelectboxColumn("Priority", options=["Alta", "Media", "Baja"]),
-                "Type": st.column_config.SelectboxColumn("Type", options=["Funcional", "Validación", "Usabilidad", "Integración", "Seguridad"]),
-                "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "Listo", "Descartado"])
-            }
+                "Priority": st.column_config.SelectboxColumn(
+                    "Priority", options=["Alta", "Media", "Baja"]
+                ),
+                "Type": st.column_config.SelectboxColumn(
+                    "Type",
+                    options=[
+                        "Funcional",
+                        "Validación",
+                        "Usabilidad",
+                        "Integración",
+                        "Seguridad",
+                    ],
+                ),
+                "Estado": st.column_config.SelectboxColumn(
+                    "Estado", options=["Pendiente", "Listo", "Descartado"]
+                ),
+            },
         )
 
         st.session_state.df_editable = edited_df
 
-        # Botón para marcar todos como listos
         if st.button("✅ Marcar todos como listos"):
             edited_df["Estado"] = "Listo"
             st.session_state.df_editable = edited_df
@@ -183,24 +225,28 @@ with tab3:
         st.info("ℹ️ No hay escenarios generados aún.")
     else:
         df_actual = df_actual.copy()
-        # Asegurar columna Estado para evitar KeyError en el filtrado
         if "Estado" not in df_actual.columns:
             df_actual["Estado"] = "Pendiente"
 
-        # Tomamos solo los estados de interés y las columnas necesarias
         columnas_base = ["Title", "Preconditions", "Steps", "Expected Result"]
         cols_presentes = [c for c in columnas_base if c in df_actual.columns]
-        df_revisar = (
-            df_actual.loc[df_actual["Estado"].isin(["Pendiente", "Listo"]), cols_presentes]
-            .copy()
-        )
+        df_revisar = df_actual.loc[
+            df_actual["Estado"].isin(["Pendiente", "Listo"]), cols_presentes
+        ].copy()
+
+        # Filtra filas completamente vacías
+        def _fila_tiene_algo(row):
+            return any(str(v).strip() for v in row.values)
+
+        if not df_revisar.empty:
+            df_revisar = df_revisar[df_revisar.apply(_fila_tiene_algo, axis=1)]
 
         if df_revisar.empty:
-            st.info("ℹ️ No hay datos para evaluar.")
+            st.info(
+                "ℹ️ No hay datos listos para evaluar. Genera escenarios en '✏️ Generar' o edítalos en '🛠️ Editar'."
+            )
         else:
             st.dataframe(df_revisar, use_container_width=True)
-
-            # CSV de contexto para el LLM
             texto_contexto = df_revisar.to_csv(index=False)
 
             if st.button("🔍 Evaluar sugerencias", key="btn_eval_sug"):
@@ -232,17 +278,21 @@ with tab3:
                         ]
                     }
 
-                    # Llama a Gemini y limpia salida
                     respuesta = enviar_a_gemini(prompt)
                     texto_raw = extraer_texto_de_respuesta_gemini(respuesta)
                     texto_csv = limpiar_markdown_csv(texto_raw)
 
                     df_sugerencias = leer_csv_seguro(texto_csv, columnas_esperadas=4)
 
-                    # Normaliza Steps y agrega columnas por defecto si faltan
                     if "Steps" in df_sugerencias.columns:
-                        df_sugerencias["Steps"] = df_sugerencias["Steps"].apply(normalizar_steps)
-                    for c, dflt in [("Type", "Funcional"), ("Priority", "Media"), ("Estado", "Pendiente")]:
+                        df_sugerencias["Steps"] = df_sugerencias["Steps"].apply(
+                            normalizar_steps
+                        )
+                    for c, dflt in [
+                        ("Type", "Funcional"),
+                        ("Priority", "Media"),
+                        ("Estado", "Pendiente"),
+                    ]:
                         if c not in df_sugerencias.columns:
                             df_sugerencias[c] = dflt
 
@@ -251,7 +301,6 @@ with tab3:
                 except Exception as e:
                     st.error(f"❌ Error al generar sugerencias: {e}")
 
-    # Render de sugerencias si existen
     df_sugerencias = st.session_state.get("sugerencias_df")
     if isinstance(df_sugerencias, pd.DataFrame) and not df_sugerencias.empty:
         st.markdown("### 💡 Sugerencias de nuevos escenarios")
@@ -266,72 +315,87 @@ with tab3:
 
         hay_seleccion = len(seleccion_indices) > 0
 
-        if st.button("➕ Aplicar escenarios seleccionados", key="btn_aplicar_sug", disabled=not hay_seleccion):
+        if st.button(
+            "➕ Aplicar escenarios seleccionados",
+            key="btn_aplicar_sug",
+            disabled=not hay_seleccion,
+        ):
             try:
                 df_aplicar = df_sugerencias.loc[seleccion_indices].copy()
 
-                # Evitar duplicados por Title contra el DF actual
-                titulos_existentes = set(st.session_state["df_editable"]["Title"].astype(str))
-                df_aplicar = df_aplicar[~df_aplicar["Title"].astype(str).isin(titulos_existentes)]
+                titulos_existentes = set(
+                    st.session_state["df_editable"]["Title"].astype(str)
+                )
+                df_aplicar = df_aplicar[
+                    ~df_aplicar["Title"].astype(str).isin(titulos_existentes)
+                ]
 
                 if df_aplicar.empty:
-                    st.info("ℹ️ Todos los seleccionados ya estaban aplicados o no hay nuevos.")
+                    st.info(
+                        "ℹ️ Todos los seleccionados ya estaban aplicados o no hay nuevos."
+                    )
                 else:
-                    # Alinear columnas con df_editable
                     cols_destino = list(st.session_state["df_editable"].columns)
                     for c in cols_destino:
                         if c not in df_aplicar.columns:
-                            df_aplicar[c] = ""  # relleno vacío para columnas faltantes
+                            df_aplicar[c] = ""
                     df_aplicar = df_aplicar[cols_destino]
 
-                    # Actualiza el DF principal
                     st.session_state["df_editable"] = pd.concat(
                         [st.session_state["df_editable"], df_aplicar], ignore_index=True
                     )
                     st.session_state["generado"] = True
 
-                    # Guarda en historial para que tab "Historial" lo vea
                     st.session_state.setdefault("historial_generaciones", [])
-                    st.session_state["historial_generaciones"].append({
-                        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "origen": "Sugerencias",
-                        "escenarios": df_aplicar.copy()
-                    })
+                    st.session_state["historial_generaciones"].append(
+                        {
+                            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "origen": "Sugerencias",
+                            "escenarios": df_aplicar.copy(),
+                        }
+                    )
 
-                    st.success(f"✅ {len(df_aplicar)} escenario(s) aplicados. Revisa 'Historial' y 'Subir a TestRail'.")
+                    st.success(
+                        f"✅ {len(df_aplicar)} escenario(s) aplicados. Revisa 'Historial' y 'Subir a TestRail'."
+                    )
             except Exception as e:
                 st.error(f"❌ Error al aplicar sugerencias: {e}")
 
 # --------------------------- TAB 4: HISTORIAL ---------------------------
 with tab4:
-    # Inicializar historial si no existe
     if "historial_generaciones" not in st.session_state:
         st.session_state["historial_generaciones"] = []
 
     historial = st.session_state["historial_generaciones"]
 
     if not historial:
-        st.info("ℹ️ Aún no hay historial disponible. Genera escenarios para comenzar a registrar.")
+        st.info(
+            "ℹ️ Aún no hay historial disponible. Genera escenarios para comenzar a registrar."
+        )
     else:
-        # Mostrar historial como tabla resumen
-        resumen = pd.DataFrame([
-            {
-                "Fecha": item["fecha"],
-                "Fuente": f"{item.get('fuente', 'Desconocida')} ({item.get('origen', 'N/A')})",
-                "Escenarios": len(item["escenarios"]),
-                "Ver": f"📝 Ver #{i}"
-            }
-            for i, item in enumerate(historial)
-        ])
+        resumen = pd.DataFrame(
+            [
+                {
+                    "Fecha": item["fecha"],
+                    "Fuente": f"{item.get('fuente', 'Desconocida')} ({item.get('origen', 'N/A')})",
+                    "Escenarios": len(item["escenarios"]),
+                    "Ver": f"📝 Ver #{i}",
+                }
+                for i, item in enumerate(historial)
+            ]
+        )
 
         st.markdown("### 🧾 Generaciones previas")
         st.dataframe(resumen, use_container_width=True, hide_index=True)
 
-        # Selector para ver un historial específico
-        seleccion = st.selectbox("Selecciona una generación para revisar:",
-                                 options=[f"#{i+1} | {item['fecha']} ({item.get('fuente', 'N/A')})"
-                                          for i, item in enumerate(historial)],
-                                 index=len(historial)-1)
+        seleccion = st.selectbox(
+            "Selecciona una generación para revisar:",
+            options=[
+                f"#{i+1} | {item['fecha']} ({item.get('fuente', 'N/A')})"
+                for i, item in enumerate(historial)
+            ],
+            index=len(historial) - 1,
+        )
 
         idx = int(seleccion.split("|")[0].replace("#", "")) - 1
         item = historial[idx]
@@ -345,26 +409,21 @@ with tab4:
 with tab5:
     st.subheader("🚀 Subir casos a TestRail")
 
-    # 📡 Obtener proyectos desde TestRail
     proyectos_raw = obtener_proyectos()
 
-    # 🛡️ Validación segura del formato
     if isinstance(proyectos_raw, dict) and "projects" in proyectos_raw:
         proyectos = proyectos_raw["projects"]
     else:
         st.error("❌ Formato inesperado al recibir proyectos.")
         st.stop()
 
-    # 🎛️ Selector de proyecto
     sel_proy = st.selectbox("Proyecto", [p["name"] for p in proyectos], key="select_proy")
     id_proy = next((p["id"] for p in proyectos if p["name"] == sel_proy), None)
 
-    # 📢 Mostrar anuncio del proyecto (si existe)
     anuncio = next((p.get("announcement") for p in proyectos if p["id"] == id_proy), None)
     if anuncio:
         st.info(f"📢 {anuncio}")
 
-    # 📁 Obtener suites del proyecto
     suites_raw = obtener_suites(id_proy)
     if isinstance(suites_raw, dict) and "suites" in suites_raw:
         suites = suites_raw["suites"]
@@ -378,7 +437,6 @@ with tab5:
     sel_suite = st.selectbox("Suite", [s["name"] for s in suites], key="select_suite")
     suite_id = next((s["id"] for s in suites if s["name"] == sel_suite), None)
 
-    # 📂 Obtener secciones de la suite
     secciones_raw = obtener_secciones(id_proy, suite_id)
     if isinstance(secciones_raw, dict) and "sections" in secciones_raw:
         secciones = secciones_raw["sections"]
@@ -389,10 +447,11 @@ with tab5:
         st.json(secciones_raw)
         st.stop()
 
-    sel_seccion = st.selectbox("Sección", [s["name"] for s in secciones], key="select_seccion")
+    sel_seccion = st.selectbox(
+        "Sección", [s["name"] for s in secciones], key="select_seccion"
+    )
     section_id = next((s["id"] for s in secciones if s["name"] == sel_seccion), None)
 
-    # ✅ Validar si hay escenarios generados para subir
     df = st.session_state.get("df_editable")
 
     if df is not None and section_id:
@@ -407,10 +466,14 @@ with tab5:
                 st.success(f"✅ {resultado['subidos']} casos subidos correctamente.")
                 st.rerun()
             else:
-                st.error(f"❌ Solo se subieron {resultado['subidos']} de {resultado['total']} casos.")
+                st.error(
+                    f"❌ Solo se subieron {resultado['subidos']} de {resultado['total']} casos."
+                )
                 if resultado["detalle"]:
                     with st.expander("🔍 Ver detalles del error"):
                         for err in resultado["detalle"]:
                             st.write(err)
     else:
-        st.info("Genera los casos en el Tab '✏️ Generar' y selecciona Proyecto, Suite y Sección.")
+        st.info(
+            "Genera los casos en el Tab '✏️ Generar' y selecciona Proyecto, Suite y Sección."
+        )
