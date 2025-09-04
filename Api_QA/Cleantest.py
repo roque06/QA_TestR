@@ -157,6 +157,9 @@ with tab1:
                 st.session_state.df_editable = None
                 st.session_state.generado = False
 
+    if st.session_state.get("df_editable") is not None:
+        st.markdown("### ✅ Escenarios generados previamente:")
+        st.dataframe(st.session_state.df_editable, use_container_width=True)
 
 # --------------------------- TAB 2: EDITAR ---------------------------
 with tab2:
