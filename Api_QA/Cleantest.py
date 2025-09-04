@@ -64,10 +64,6 @@ st.markdown("""
 <div class="divider"></div>
 """, unsafe_allow_html=True)
 
-if st.button("🧹 Limpiar todo", key="btn_limpiar_global"):
-    limpiar_pestanas()
-    st.rerun()
-
 
 # --------------------------- TAB 1: GENERAR ---------------------------
 with tab1:
@@ -494,3 +490,4 @@ with tab5:
                             st.write(err)
     else:
         st.info("Genera los casos en el Tab '✏️ Generar' y selecciona Proyecto, Suite y Sección.")
+
