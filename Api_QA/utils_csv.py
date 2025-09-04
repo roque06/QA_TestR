@@ -65,11 +65,71 @@ def corregir_csv_con_comas(texto_csv: str, columnas_objetivo: int = 6) -> str:
     return "\n".join(corregido)
 
 
-def normalizar_steps(steps):
+import re
+
+def normalizar_preconditions(preconds: str) -> str:
+    """
+    Idempotente: quita numeraciones previas (1., 2., …), separa por saltos de línea o ';',
+    limpia vacíos/duplicados y vuelve a enumerar una sola vez.
+    """
+    if not isinstance(preconds, str):
+        return ""
+    txt = preconds.replace("\\n", "\n").strip()
+    if not txt:
+        return ""
+
+    # Romper por líneas o ';' y también trocear si metieron varias en la misma línea
+    candidatos = []
+    for linea in txt.split("\n"):
+        for trozo in re.split(r";", linea):
+            trozo = trozo.strip()
+            if not trozo:
+                continue
+            # Quitar viñetas/numeraciones previas al inicio de cada item
+            trozo = re.sub(r"^\s*(?:-|\*|•)?\s*", "", trozo)
+            trozo = re.sub(r"^\s*\d+\.\s*", "", trozo)
+            if trozo:
+                candidatos.append(trozo)
+
+    # Dejar únicos en el orden de aparición
+    vistos, items = set(), []
+    for c in candidatos:
+        if c not in vistos:
+            vistos.add(c)
+            items.append(c)
+
+    return "\n".join(f"{i+1}. {c}" for i, c in enumerate(items))
+
+
+def normalizar_steps(steps: str) -> str:
+    """
+    Idempotente: si viene '1. … 2. …' en una línea o varias, quita numeraciones
+    antiguas y vuelve a enumerar en líneas separadas.
+    """
     if not isinstance(steps, str):
         return ""
-    pasos_separados = re.sub(r'\s*(\d+\.\s)', r'\n\1', steps).strip()
-    return pasos_separados
+    txt = steps.replace("\\n", "\n").strip()
+    if not txt:
+        return ""
+
+    partes = []
+    for linea in txt.split("\n"):
+        linea = linea.strip()
+        if not linea:
+            continue
+        # Si trae varios pasos en la misma línea: '1. foo 2. bar 3. baz'
+        trozos = re.split(r"(?=\d+\.\s)", linea) if re.search(r"\d+\.\s", linea) else [linea]
+        for t in trozos:
+            t = t.strip()
+            if not t:
+                continue
+            # Quitar numeración/bullets previas
+            t = re.sub(r"^\s*(?:-|\*|•)?\s*", "", t)
+            t = re.sub(r"^\s*\d+\.\s*", "", t)
+            if t:
+                partes.append(t)
+
+    return "\n".join(f"{i+1}. {p}" for i, p in enumerate(partes))
 
 
 
