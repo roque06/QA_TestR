@@ -69,95 +69,88 @@ if st.button("🧹 Limpiar todo", key="btn_limpiar_global"):
     st.rerun()
 
 
-# --------------------------- TAB 1: GENERAR (AUTOMÁTICO) ---------------------------
+# --------------------------- TAB 1: GENERAR ---------------------------
 with tab1:
-
     st.subheader("📌 Generar escenarios de prueba automáticamente")
 
-    # Estado necesario para disparo automático y evitar loops
-    ss = st.session_state
-    ss.setdefault("gen_text_hash", None)
-    ss.setdefault("gen_inflight", False)
-
-    # Entrada principal (persistente)
+    # 📝 Entrada: texto funcional
     texto_funcional = st.text_area(
         "Texto funcional original",
-        value=ss.get("texto_funcional", ""),
-        height=250,
-        key="texto_funcional"
+        value=st.session_state.get("texto_funcional", ""),
+        height=260,
+        key="texto_funcional",
+        help="Pega aquí la descripción funcional que quieres convertir a escenarios."
     )
 
-    # Detectar cambios de texto (hash estable) y decidir si hay que correr
-    cur_hash = hashlib.sha256(ss["texto_funcional"].encode("utf-8")).hexdigest()[:12] if ss["texto_funcional"].strip() else None
-    should_run = bool(cur_hash and cur_hash != ss["gen_text_hash"] and not ss["gen_inflight"])
+    # 🎛️ Acciones visibles y a lo ancho
+    c1, c2 = st.columns([1, 1])
+    generar_click = c1.button("⚙️ Generar escenarios de prueba", key="btn_generar_tab1", use_container_width=True)
+    limpiar_click  = c2.button("🧹 Limpiar todo", key="btn_limpiar_tab1", use_container_width=True)
 
-    if should_run:
-        ss["gen_inflight"] = True
-        try:
-            # 1) Refinar la descripción funcional
-            with spinner_accion("🧠 Reestructurando descripción..."):
-                descripcion_refinada = obtener_descripcion_refinada(ss["texto_funcional"])  # :contentReference[oaicite:7]{index=7}
-            ss["descripcion_refinada"] = descripcion_refinada
+    if limpiar_click:
+        # Resetea estado mínimo sin tocar el historial
+        st.session_state["df_editable"] = None
+        st.session_state["generado"] = False
+        st.session_state["texto_funcional"] = ""
+        st.session_state["descripcion_refinada"] = ""
+        st.rerun()
 
-            # 2) Pedir a Gemini un CSV profesional (6 columnas)
-            with spinner_accion("📄 Generando escenarios profesionales (CSV)..."):
-                resp = enviar_a_gemini(                                              # :contentReference[oaicite:8]{index=8}
-                    prompt_generar_escenarios_profesionales(descripcion_refinada)     # :contentReference[oaicite:9]{index=9}
-                )
-                texto_csv_raw = extraer_texto_de_respuesta_gemini(resp).strip()       # :contentReference[oaicite:10]{index=10}
-
-            # 3) Limpieza/validación robusta del CSV
-            csv_limpio = limpiar_markdown_csv(texto_csv_raw)                          # quita ```csv ...``` y ruido :contentReference[oaicite:11]{index=11}
-            csv_valido = limpiar_csv_con_formato(csv_limpio, columnas_esperadas=6)    # filtra filas mal formadas   :contentReference[oaicite:12]{index=12}
-            csv_corregido = corregir_csv_con_comas(csv_valido, columnas_objetivo=6)   # re-escapa comas internas    :contentReference[oaicite:13]{index=13}
-
-            # 4) Cargar a DataFrame contemplando si hay/si no hay encabezados
-            expected_cols = ["Title", "Preconditions", "Steps", "Expected Result", "Type", "Priority"]
-            df = None
+    if generar_click:
+        if not st.session_state["texto_funcional"].strip():
+            st.warning("⚠️ Ingresa el texto funcional primero.")
+        else:
             try:
-                validar_csv_qa(csv_corregido)                                        # exige header exacto          :contentReference[oaicite:14]{index=14}
-                df = pd.read_csv(io.StringIO(csv_corregido))
-            except Exception:
-                # No venía encabezado → imponemos nombres
-                df = pd.read_csv(io.StringIO(csv_corregido), header=None, names=expected_cols)
-                # Si por algún motivo la primera fila coincide con los headers, elimínala
-                if not df.empty and [str(x).strip() for x in df.iloc[0].tolist()] == expected_cols:
-                    df = df.iloc[1:].reset_index(drop=True)
+                # 1) Refinar descripción para guiar al LLM
+                with st.spinner("🧠 Reestructurando texto..."):
+                    descripcion_refinada = obtener_descripcion_refinada(st.session_state["texto_funcional"])
+                st.session_state["descripcion_refinada"] = descripcion_refinada
 
-            # 5) Normalizaciones y columnas mínimas
-            df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-            if "Steps" in df.columns:
-                df["Steps"] = df["Steps"].apply(normalizar_steps).str.replace(r'\\n', '\n', regex=True)  # :contentReference[oaicite:15]{index=15}
-            if "Estado" not in df.columns:
+                # 2) Pedir a Gemini CSV profesional (6 columnas)
+                with st.spinner("📄 Generando escenarios CSV profesionales..."):
+                    respuesta_csv = enviar_a_gemini(
+                        prompt_generar_escenarios_profesionales(descripcion_refinada)
+                    )
+                    texto_csv_raw = extraer_texto_de_respuesta_gemini(respuesta_csv).strip()
+
+                # 3) Limpiezas para CSV robusto
+                csv_limpio    = limpiar_markdown_csv(texto_csv_raw)                                # quita ``` y basura
+                csv_valido    = limpiar_csv_con_formato(csv_limpio, columnas_esperadas=6)          # filtra filas con 6 cols
+                csv_corregido = corregir_csv_con_comas(csv_valido, columnas_objetivo=6)            # reescapa comas
+                df = pd.read_csv(io.StringIO(csv_corregido))
+                # Normalizaciones
+                df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+                if "Steps" in df.columns:
+                    df["Steps"] = df["Steps"].apply(normalizar_steps).str.replace(r'\\n', '\n', regex=True)
                 df["Estado"] = "Pendiente"
 
-            # 6) Guardar en estado y registrar historial
-            ss.df_editable = df
-            ss.generado = True
-            ss["historial_generaciones"].append({
-                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "fuente": "QA",
-                "origen": "Generación inicial",
-                "descripcion": descripcion_refinada,
-                "escenarios": df.copy()
-            })
+                # 4) Persistir en sesión
+                st.session_state.df_editable = df
+                st.session_state.generado = True
 
-            # Actualizar hash para que no se regenere en loop
-            ss["gen_text_hash"] = cur_hash
-            st.success(f"✅ Se generaron {len(df)} escenarios.")
-            st.dataframe(df, use_container_width=True)
+                from datetime import datetime
+                st.session_state.setdefault("historial_generaciones", [])
+                st.session_state["historial_generaciones"].append({
+                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "fuente": "QA",
+                    "origen": "Generación inicial",
+                    "descripcion": descripcion_refinada,
+                    "escenarios": df.copy()
+                })
 
-        except Exception as e:
-            # Evita loops: fija el hash actual aunque haya fallo (usuario debe editar para reintentar)
-            ss["gen_text_hash"] = cur_hash
-            st.error(f"❌ Error durante la generación automática: {e}")
-        finally:
-            ss["gen_inflight"] = False
+                st.success(f"✅ Se generaron {len(df)} escenarios.")
+                st.dataframe(df, use_container_width=True)
 
-    # Mostrar DF si ya existía (sin volver a generar)
-    if ss.get("df_editable") is not None and isinstance(ss.df_editable, pd.DataFrame) and not ss.df_editable.empty:
-        st.markdown("### ✅ Escenarios generados previamente:")
-        st.dataframe(ss.df_editable, use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ Error durante el proceso: {e}")
+                # Mostrar lo que vino para depurar
+                try:
+                    st.text_area("⚠️ CSV recibido (crudo)", texto_csv_raw, height=220)
+                except Exception:
+                    pass
+                st.session_state.df_editable = None
+                st.session_state.generado = False
+
+
 
 
 
