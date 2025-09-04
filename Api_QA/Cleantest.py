@@ -182,6 +182,7 @@ with tab2:
 
 
 # --------------------------- TAB 3: REVISAR / SUGERENCIAS ---------------------------
+# --------------------------- TAB 3: REVISAR / SUGERENCIAS ---------------------------
 with tab3:
     st.subheader("💡 Sugerencias de nuevos escenarios a partir del análisis actual")
 
@@ -200,16 +201,10 @@ with tab3:
         if df_revisar.empty:
             st.info("ℹ️ No hay datos para evaluar.")
         else:
-            # Normalizar formato visible
-            if "Steps" in df_revisar.columns:
-                df_revisar["Steps"] = df_revisar["Steps"].apply(normalizar_steps)
-            if "Preconditions" in df_revisar.columns:
-                df_revisar["Preconditions"] = df_revisar["Preconditions"].apply(normalizar_preconditions)
-
             st.dataframe(df_revisar, use_container_width=True)
 
             # CSV de contexto para el LLM
-            texto_contexto = df_revisar.to_csv(index=False)
+            contexto_csv = df_revisar.to_csv(index=False)
 
             if st.button("🔍 Evaluar sugerencias", key="btn_eval_sug"):
                 try:
@@ -220,19 +215,34 @@ with tab3:
                                     {
                                         "text": (
                                             "Eres un Analista QA Senior especializado en diseño de pruebas funcionales.\n\n"
-                                            "Evalúa los siguientes escenarios de prueba ya existentes (en formato CSV) y sugiere nuevos escenarios complementarios que amplíen la cobertura.\n\n"
-                                            "Los nuevos escenarios deben centrarse en:\n"
-                                            "- Validaciones que no estén cubiertas\n"
-                                            "- Casos negativos, edge cases o de seguridad\n"
-                                            "- Usabilidad, persistencia de datos y experiencia del usuario\n\n"
-                                            "📄 Formato requerido del CSV (sin encabezados ni explicaciones):\n"
+                                            "A partir del CSV de escenarios existente, sugiere nuevos casos COMPLEMENTARIOS "
+                                            "(sin repetir los actuales) y devuélvelos en **CSV puro** con columnas EXACTAS:\n"
                                             "Title,Preconditions,Steps,Expected Result\n\n"
-                                            "🎯 Instrucciones clave:\n"
-                                            "- NO repitas escenarios ya presentes\n"
-                                            "- Genera entre 4 y 8 escenarios distintos\n"
-                                            "- Usa lenguaje profesional y técnico\n"
-                                            "- No incluyas texto fuera del CSV\n\n"
-                                            f"CSV:\n{texto_contexto}"
+                                            "REGLAS DE SALIDA (obligatorias):\n"
+                                            "- SOLO imprime el CSV (sin explicaciones, sin markdown, sin texto adicional).\n"
+                                            "- Usa comas como separador; si un campo contiene comas o saltos de línea, ENCERRAR en comillas dobles.\n"
+                                            "- Steps numerados como '1. ', '2. ', '3. ', cada uno en su propia línea usando \\n dentro de la celda.\n"
+                                            "- Genera 4–8 casos nuevos, profesionales y no redundantes con el contexto.\n\n"
+                                            "PRECONDITIONS (formato y contenido OBLIGATORIOS):\n"
+                                            "- Deben ir **enumeradas** y en **líneas separadas dentro de la misma celda** usando \\n.\n"
+                                            "- Sigue SIEMPRE este patrón (según aplique por el escenario):\n"
+                                            "  1. Aplicación disponible y sesión iniciada\n"
+                                            "  2. Usuario con permisos para <ACCIÓN inferida de los Steps>\n"
+                                            "  3. Existen <DATOS DE NEGOCIO requeridos> (p. ej., asiento contable X, movimientos en rango, cliente válido)\n"
+                                            "  4. Servicios de <MÓDULO/SUBMÓDULO> <operativos | NO operativos (si el caso es negativo por indisponibilidad)>\n"
+                                            "- Inferir **<ACCIÓN>** desde los Steps (mapa típico):\n"
+                                            "    consultar/ver → 'consultar'; exportar/descargar → 'exportar';\n"
+                                            "    generar reporte → 'consultar y generar reportes'; acceder → 'acceder al módulo';\n"
+                                            "    crear/editar/eliminar → 'crear/editar/eliminar <objeto>' según corresponda.\n"
+                                            "- Si los Steps implican error por caída/indisponibilidad → usa 'NO operativos'; de lo contrario 'operativos'.\n"
+                                            "- Prohibido: 'Ninguna', 'N/A', o solo 'Usuario con sesión iniciada' sin permisos ni datos.\n\n"
+                                            "CHECKLIST interno antes de responder (NO imprimir):\n"
+                                            "- ¿Permisos alineados con la acción principal de los Steps? ✔\n"
+                                            "- ¿Datos de negocio explícitos y realistas? ✔\n"
+                                            "- ¿Servicios correctamente marcados operativos/NO operativos según el objetivo del caso? ✔\n"
+                                            "- ¿Preconditions enumeradas con '\\n' dentro de la celda y sin duplicados? ✔\n\n"
+                                            "Contexto (CSV existente):\n"
+                                            f"{contexto_csv}"
                                         )
                                     }
                                 ]
@@ -248,12 +258,12 @@ with tab3:
                     # Cargar sugerencias (4 columnas)
                     df_sugerencias = leer_csv_seguro(texto_csv, columnas_esperadas=4)
 
-                    # Normaliza Steps y Preconditions + columnas por defecto
+                    # No normalizamos Precondition localmente: dejamos el formato tal como viene de Gemini
+                    # (sí limpiamos Steps para garantizar saltos de línea visibles)
                     if "Steps" in df_sugerencias.columns:
                         df_sugerencias["Steps"] = df_sugerencias["Steps"].apply(normalizar_steps)
-                    if "Preconditions" in df_sugerencias.columns:
-                        df_sugerencias["Preconditions"] = df_sugerencias["Preconditions"].apply(normalizar_preconditions)
 
+                    # Completar metadatos faltantes para integrarse con el DF principal
                     for c, dflt in [("Type", "Funcional"), ("Priority", "Media"), ("Estado", "Pendiente")]:
                         if c not in df_sugerencias.columns:
                             df_sugerencias[c] = dflt
@@ -293,7 +303,7 @@ with tab3:
                     cols_destino = list(st.session_state["df_editable"].columns)
                     for c in cols_destino:
                         if c not in df_aplicar.columns:
-                            df_aplicar[c] = ""  # relleno para columnas faltantes
+                            df_aplicar[c] = ""  # relleno vacío para columnas faltantes
                     df_aplicar = df_aplicar[cols_destino]
 
                     # Actualiza el DF principal
