@@ -21,33 +21,54 @@ def prompt_generar_escenarios_profesionales(descripcion_refinada):
                     {
                         "text": (
                             "Eres un Analista QA Senior experto en diseño de pruebas funcionales para sistemas empresariales.\n\n"
-                            "A partir de la siguiente descripción funcional, genera una tabla en formato **CSV puro**, SIN explicaciones, SIN encabezados adicionales, y SIN comentarios externos.\n\n"
-                            "La tabla debe tener exactamente las siguientes columnas:\n"
+                            "A partir de la siguiente descripción funcional RECIÉN REFINADA, genera una tabla en formato CSV puro "
+                            "con exactamente estas columnas:\n"
                             "Title,Preconditions,Steps,Expected Result,Type,Priority\n\n"
-                            "🎯 INSTRUCCIONES ESTRICTAS:\n"
-                            "- NO escribas texto adicional fuera del CSV.\n"
-                            "- NO incluyas cabeceras como 'Escenarios sugeridos:' ni bloques explicativos.\n"
-                            "- En 'Preconditions', escribe condiciones reales, no uses 'Ninguna'. Ejemplos:\n"
-                            "    • Usuario con sesión iniciada\n"
-                            "    • Cliente registrado con movimientos\n"
-                            "    • Navegador abierto con filtros activos\n"
-                            "- En 'Steps', usa numeración clara: 1. 2. 3. (separadas por punto y espacio)\n"
-                            "- Si alguna celda contiene comas, encierra su contenido entre comillas dobles (\"\").\n"
-                            "- Usa solo estos valores en 'Type': Funcional, Validación, Seguridad, Usabilidad\n"
-                            "- Usa solo estos valores en 'Priority': Alta, Media, Baja\n"
-                            "- Todos los escenarios deben ser específicos, profesionales y relacionados directamente con la descripción.\n"
-                            "- Genera entre **8 y 12 escenarios distintos**, que incluyan:\n"
-                            "    • 1 escenario exitoso (Happy Path)\n"
-                            "    • 4-6 escenarios negativos (errores, entradas inválidas, omisiones)\n"
-                            "    • 1-2 de Seguridad o Edge Cases\n"
-                            "    • 1-2 de Usabilidad o persistencia\n\n"
-                            f"📄 Descripción funcional:\n{descripcion_refinada}"
+
+                            "⚠️ REGLAS ESTRICTAS DE SALIDA:\n"
+                            "- SOLO imprime el CSV. Nada de texto extra, títulos, explicaciones ni bloques Markdown.\n"
+                            "- Usa comas como separador; si una celda contiene comas o saltos de línea, enciérrala entre comillas dobles.\n"
+                            "- Steps numerados como: 1. 2. 3. (separados por punto y espacio).\n"
+                            "- Type ∈ {Funcional, Validación, Seguridad, Usabilidad}.\n"
+                            "- Priority ∈ {Alta, Media, Baja}.\n"
+                            "- Genera entre 8 y 12 escenarios profesionales (1 feliz, 4–6 negativos, 1–2 seguridad/edge, 1–2 usabilidad/persistencia).\n\n"
+
+                            "🎯 INSTRUCCIONES ESPECÍFICAS PARA **Preconditions** (obligatorio cumplir):\n"
+                            "- Deben ser **concretas y accionables**, derivadas de la descripción. Evita genéricos como "
+                            "\"Usuario con sesión iniciada\" si no están acompañados de los supuestos de datos y servicios.\n"
+                            "- Cuando la funcionalidad mencione o implique:\n"
+                            "  • **Identificación** (tipo/número de documento): incluir 'Cliente registrado con documento vigente en base de datos'.\n"
+                            "  • **Producto Tarjeta de Crédito**: incluir 'Cliente con al menos una tarjeta de crédito activa/valida'.\n"
+                            "  • **Segmento del cliente**: incluir 'Producto habilitado/compatible con el segmento del cliente'.\n"
+                            "  • **Validaciones/Reglas**: incluir 'Servicios/reglas de negocio y motores de validación operativos'.\n"
+                            "  • **Sesión/Portal**: incluir 'Aplicación disponible y sesión iniciada en el portal transaccional'.\n"
+                            "- Si aplica más de una, **combínalas** en la precondición (separadas por '; ').\n"
+                            "- Prohíbido: 'Ninguna', 'N/A', precondiciones vacías o genéricas sin contexto de datos/servicios.\n\n"
+
+                            "🧪 FEW-SHOT (NO IMPRIMIR EN LA RESPUESTA):\n"
+                            "Ejemplo de buena precondición cuando hay identificación + tarjeta + segmento:\n"
+                            "  'Aplicación disponible y sesión iniciada en el portal transaccional; "
+                            "Cliente registrado en la base de datos con documento vigente; "
+                            "Cliente con al menos una tarjeta de crédito activa; "
+                            "La tarjeta está habilitada para el segmento del cliente; "
+                            "Servicios de validación y reglas de negocio operativos'\n\n"
+
+                            "✅ CHECKLIST PRE-SALIDA (obligatorio cumplir internamente, sin imprimirlo):\n"
+                            "- Si los Steps/Descripción mencionan identificación → la precondición incluye 'cliente registrado + documento vigente'.\n"
+                            "- Si mencionan tarjeta de crédito → incluye 'tarjeta activa/valida'.\n"
+                            "- Si mencionan segmento → incluye 'tarjeta habilitada para el segmento'.\n"
+                            "- Si hay 'validar' o reglas → incluye 'servicios/reglas operativos'.\n"
+                            "- Si hay acciones en la UI → incluye 'aplicación disponible y sesión iniciada'.\n\n"
+
+                            "📄 Descripción funcional (refinada):\n"
+                            f"{descripcion_refinada}"
                         )
                     }
                 ]
             }
         ]
     }
+
 
 
 
@@ -253,3 +274,4 @@ def obtener_descripcion_refinada(texto_funcional, max_intentos=3):
     # si llega aquí, todos los intentos fallaron
 
     raise ValueError("⚠️ Gemini no devolvió descripción válida tras varios intentos.")
+
