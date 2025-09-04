@@ -1,84 +1,131 @@
-# utils_testrail.py
 import requests
+import pandas as pd
 import streamlit as st
+import re
 
-def _testrail_cfg():
-    """
-    Devuelve credenciales de TestRail desde st.secrets.
-    Se espera en .streamlit/secrets.toml:
-        testrail_url = "https://..."
-        testrail_email = "usuario@empresa.com"
-        testrail_api_key = "API_KEY"
-    """
-    url   = st.secrets.get("testrail_url")
-    email = st.secrets.get("testrail_email")
-    api_key = st.secrets.get("testrail_api_key")
+# 🔐 Obtener credenciales desde .streamlit/secrets.toml
+TESTRAIL_DOMAIN = st.secrets["testrail_url"]
+TESTRAIL_USER = st.secrets["testrail_email"]
+TESTRAIL_API_KEY = st.secrets["testrail_api_key"]
 
-    missing = [k for k, v in {
-        "testrail_url": url, "testrail_email": email, "testrail_api_key": api_key
-    }.items() if not v]
-    if missing:
-        st.error(f"❌ Faltan claves en secrets.toml: {', '.join(missing)}")
-        st.stop()
+HEADERS = {
+    "Content-Type": "application/json"
+}
+AUTH = (TESTRAIL_USER, TESTRAIL_API_KEY)
 
-    return {"url": url, "email": email, "api_key": api_key}
-
-
-def _auth_headers(cfg):
-    return {
-        "Content-Type": "application/json",
-    }, (cfg["email"], cfg["api_key"])
-
-
-# Ejemplos de funciones usando esa config
+# 🧩 Obtener lista de proyectos
 def obtener_proyectos():
-    cfg = _testrail_cfg()
-    headers, auth = _auth_headers(cfg)
-    resp = requests.get(f"{cfg['url']}/index.php?/api/v2/get_projects", headers=headers, auth=auth)
-    if resp.status_code != 200:
-        st.error(f"Error obteniendo proyectos: {resp.status_code} - {resp.text}")
-        return []
-    return resp.json()
+    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/get_projects"
+    try:
+        response = requests.get(url, auth=AUTH)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"❌ Error al obtener proyectos: {e}")
+        return None
+
+# 📁 Obtener suites de un proyecto
+def obtener_suites(project_id):
+    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/get_suites/{project_id}"
+    try:
+        response = requests.get(url, auth=AUTH)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"❌ Error al obtener suites: {e}")
+        return None
+
+# 📂 Obtener secciones de una suite
+def obtener_secciones(project_id, suite_id):
+    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/get_sections/{project_id}&suite_id={suite_id}"
+    try:
+        response = requests.get(url, auth=AUTH)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"❌ Error al obtener secciones: {e}")
+        return None
+    
+    
 
 
-def obtener_suites(project_id: int):
-    cfg = _testrail_cfg()
-    headers, auth = _auth_headers(cfg)
-    resp = requests.get(f"{cfg['url']}/index.php?/api/v2/get_suites/{project_id}", headers=headers, auth=auth)
-    return resp.json()
 
+TESTRAIL_DOMAIN = st.secrets["testrail_url"]
+TESTRAIL_USER = st.secrets["testrail_email"]
+TESTRAIL_API_KEY = st.secrets["testrail_api_key"]
 
-def obtener_secciones(project_id: int, suite_id: int):
-    cfg = _testrail_cfg()
-    headers, auth = _auth_headers(cfg)
-    resp = requests.get(f"{cfg['url']}/index.php?/api/v2/get_sections/{project_id}&suite_id={suite_id}", headers=headers, auth=auth)
-    return resp.json()
+HEADERS = {"Content-Type": "application/json"}
+AUTH = (TESTRAIL_USER, TESTRAIL_API_KEY)
 
+def _s(x):  # coerce a string
+    return "" if x is None else str(x).strip()
 
-def enviar_a_testrail(suite_id: int, section_id: int, cases: list):
+def _oraculo_breve_sin_duplicar(title: str, steps: str, expected: str) -> str:
     """
-    cases = [
-        {"title": "...", "custom_preconds": "...", "custom_steps": "..."}
-    ]
+    Genera un oráculo corto (regla verificable) que NO sea igual al Expected.
+    - Si el expected habla de 'obligatorio'/'no se envía', convertirlo a regla genérica.
+    - Si sigue quedando idéntico, usar una regla de validación compacta.
     """
-    cfg = _testrail_cfg()
-    headers, auth = _auth_headers(cfg)
+    t = _s(title).lower()
+    s = _s(steps).lower()
+    e = _s(expected).strip()
 
-    results = []
-    for case in cases:
-        payload = {
-            "title": case.get("title", ""),
-            "custom_preconds": case.get("custom_preconds", ""),
-            "custom_steps": case.get("custom_steps", "")
+    # Heurísticas simples para casos comunes
+    if re.search(r"obligatori|requerid", e.lower()) or "no se envía" in e.lower():
+        # intenta extraer el campo implicado del título o pasos
+        m = re.search(r"(campo|nombre)\s*['“\"]?([^'”\"]+)['”\"]?", t) or \
+            re.search(r"(campo|nombre)\s*['“\"]?([^'”\"]+)['”\"]?", s)
+        campo = m.group(2) if m else "el campo requerido"
+        oracle = f"Regla: si falta {campo}, el formulario debe bloquear el envío y mostrar validación."
+    else:
+        # Regla general corta basada en título
+        oracle = f"Regla: { _s(title) } cumple condición de aceptación sin persistir datos inválidos."
+
+    # Evita igualdad exacta con Expected
+    if oracle.strip().lower() == e.strip().lower():
+        oracle = "Regla: validar mensaje y bloqueo en ausencia de dato requerido."
+
+    return oracle
+
+def enviar_a_testrail(section_id, dataframe: pd.DataFrame):
+    url = f"{TESTRAIL_DOMAIN}/index.php?/api/v2/add_case/{section_id}"
+    exitosos, errores = 0, []
+
+    for i, fila in dataframe.iterrows():
+        title = _s(fila.get("Title", "Caso sin título"))
+        pre = _s(fila.get("Preconditions", ""))
+        steps = _s(fila.get("Steps", ""))
+        expected = _s(fila.get("Expected Result", ""))
+        tipo = _s(fila.get("Type", "Funcional"))
+        prio = _s(fila.get("Priority", "Media"))
+
+        # Oráculo breve y distinto del expected
+        oracle = _oraculo_breve_sin_duplicar(title, steps, expected)
+        if not oracle:
+            oracle = "Regla: validar condición de aceptación sin duplicar el resultado esperado."
+
+        datos = {
+            "title": title,
+            "custom_preconds": pre,
+            "custom_steps": steps,
+            "custom_expected": expected,
+            "custom_type": tipo,
+            "custom_priority": prio,
+            "custom_case_oracle": oracle,  # <- aquí el campo obligatorio
         }
-        resp = requests.post(
-            f"{cfg['url']}/index.php?/api/v2/add_case/{section_id}",
-            headers=headers, auth=auth, json=payload
-        )
-        if resp.status_code == 200:
-            results.append(resp.json())
-        else:
-            st.error(f"Error creando caso: {resp.status_code} - {resp.text}")
-    return results
 
+        try:
+            r = requests.post(url, headers=HEADERS, auth=AUTH, json=datos)
+            if r.status_code in (200, 201):
+                exitosos += 1
+            else:
+                errores.append(f"Fila {i}: {r.status_code} - {r.text}")
+        except Exception as e:
+            errores.append(f"Fila {i}: {e}")
 
+    return {
+        "exito": exitosos == len(dataframe),
+        "subidos": exitosos,
+        "total": len(dataframe),
+        "detalle": errores if errores else None,
+    }
